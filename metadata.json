@@ -1,0 +1,6 @@
+{
+  "name": "MBTI 성격 궁합 분석기",
+  "description": "Google AI Studio Gemini 기반 16가지 MBTI 유형별 핵심 성향 및 최상/최악의 궁합 맞춤 분석 서비스",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
