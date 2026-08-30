@@ -7,6 +7,7 @@ import { PartnerSelector } from './components/PartnerSelector';
 import { LoadingState } from './components/LoadingState';
 import { ResultView } from './components/ResultView';
 import { MBTIModal } from './components/MBTIModal';
+import { getFallbackAnalysis } from './data/fallbackAnalysis';
 import { ArrowRight, AlertCircle } from 'lucide-react';
 
 export default function App() {
@@ -40,16 +41,28 @@ export default function App() {
         }),
       });
 
-      if (!response.ok) {
-        throw new Error(`분석 요청 실패 (상태 코드: ${response.status})`);
+      if (response.ok) {
+        const contentType = response.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          const data: MBTIAnalysisResult = await response.json();
+          if (data && data.best_match && data.worst_match) {
+            setResult(data);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+            return;
+          }
+        }
       }
 
-      const data: MBTIAnalysisResult = await response.json();
-      setResult(data);
+      // If API route is not mounted or returns non-JSON fallback directly
+      console.warn('API route unreachable or returned non-JSON, generating deterministic analysis.');
+      const fallbackData = getFallbackAnalysis(userMbti, relationshipType, partnerMbti || undefined);
+      setResult(fallbackData);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err: any) {
-      console.error('Error analyzing MBTI:', err);
-      setError('분석 도중 일시적인 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.');
+      console.warn('Fetch error caught, using fallback analyzer:', err);
+      const fallbackData = getFallbackAnalysis(userMbti, relationshipType, partnerMbti || undefined);
+      setResult(fallbackData);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     } finally {
       setIsLoading(false);
     }

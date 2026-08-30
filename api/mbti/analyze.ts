@@ -1,28 +1,14 @@
-import express, { Request, Response } from 'express';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import dotenv from 'dotenv';
+import type { Request, Response } from 'express';
 import { GoogleGenAI, Type } from '@google/genai';
-import { createServer as createViteServer } from 'vite';
-import { getFallbackAnalysis } from './src/data/fallbackAnalysis';
-import { MBTIType, RelationshipContext } from './src/types';
-
-dotenv.config();
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const app = express();
-const PORT = 3000;
-
-app.use(express.json());
+import { getFallbackAnalysis } from '../../src/data/fallbackAnalysis';
+import { MBTIType, RelationshipContext } from '../../src/types';
 
 // Lazy-initialized Gemini client
 let genAIClient: GoogleGenAI | null = null;
 function getGenAI(): GoogleGenAI | null {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    console.warn('GEMINI_API_KEY is not set. Using fallback heuristic analyzer.');
+    console.warn('GEMINI_API_KEY is not set on Vercel. Using fallback analyzer.');
     return null;
   }
   if (!genAIClient) {
@@ -38,26 +24,38 @@ function getGenAI(): GoogleGenAI | null {
   return genAIClient;
 }
 
-// Health check endpoint
-app.get('/api/health', (req: Request, res: Response) => {
-  res.json({ status: 'ok', time: new Date().toISOString() });
-});
+export default async function handler(req: Request, res: Response) {
+  // Enable CORS if accessed externally
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
+  );
 
-// MBTI Analysis endpoint
-app.post('/api/mbti/analyze', async (req: Request, res: Response) => {
-  const { user_mbti, relationship_type, partner_mbti } = req.body;
-
-  if (!user_mbti) {
-    return res.status(400).json({ error: 'user_mbti is required' });
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
   }
 
-  const ai = getGenAI();
-  if (!ai) {
-    const fallback = getFallbackAnalysis(user_mbti as MBTIType, relationship_type as RelationshipContext, partner_mbti as MBTIType);
-    return res.json(fallback);
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method Not Allowed' });
   }
 
   try {
+    const { user_mbti, relationship_type, partner_mbti } = req.body || {};
+
+    if (!user_mbti) {
+      return res.status(400).json({ error: 'user_mbti is required' });
+    }
+
+    const ai = getGenAI();
+    if (!ai) {
+      const fallback = getFallbackAnalysis(user_mbti as MBTIType, relationship_type as RelationshipContext, partner_mbti as MBTIType);
+      return res.status(200).json(fallback);
+    }
+
     const relContextStr = relationship_type === 'love' ? '연애 및 로맨스 궁합' :
                           relationship_type === 'work' ? '직장 동료 및 비즈니스 협업' :
                           relationship_type === 'friend' ? '친구 및 사교적 교류' : '전반적 대인관계 및 성향';
@@ -167,38 +165,15 @@ ${partner_mbti ? `비교 대상 상대방 MBTI: ${partner_mbti}` : ''}
 
     const parsed = JSON.parse(text);
     parsed.relationship_type = relationship_type || 'general';
-    return res.json(parsed);
+    return res.status(200).json(parsed);
   } catch (error: any) {
-    console.error('Error in /api/mbti/analyze:', error);
-    // Fallback on error to keep app interactive
-    const fallback = getFallbackAnalysis(user_mbti as MBTIType, relationship_type as RelationshipContext, partner_mbti as MBTIType);
-    return res.json(fallback);
+    console.error('Error in Vercel API /api/mbti/analyze:', error);
+    const { user_mbti, relationship_type, partner_mbti } = req.body || {};
+    const fallback = getFallbackAnalysis(
+      (user_mbti as MBTIType) || 'INTJ',
+      (relationship_type as RelationshipContext) || 'love',
+      partner_mbti as MBTIType
+    );
+    return res.status(200).json(fallback);
   }
-});
-
-// Vite middleware or static serving
-async function startServer() {
-  if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req: Request, res: Response) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
-  }
-
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`MBTI Analyzer server running on http://0.0.0.0:${PORT}`);
-  });
 }
-
-if (!process.env.VERCEL) {
-  startServer();
-}
-
-export default app;
